@@ -1,11 +1,11 @@
 import math
 import torch
 
-from model import LatentNeuralODE, log_normal_pdf
+from base_model import LatentODE, log_normal_pdf
 from utils import view_with_k
 
 
-class IWLatentODE(LatentNeuralODE):
+class IWLatentODE(LatentODE):
 
     def __init__(self, enc, nodef, dec):
         super().__init__(enc, nodef, dec)
@@ -16,24 +16,24 @@ class IWLatentODE(LatentNeuralODE):
 
         return z0, epsilon
 
-    def forward(self, x, ts, K, mask=None, rtol=1e-3, atol=1e-4):
-        qz0_mean, qz0_logvar = self.get_latent_initial_state(x, ts, mask)
+    def forward(self, x, ts, M, K, rtol=1e-3, atol=1e-4, method='dopri5'):
+        qz0_mean, qz0_logvar = self.get_latent_initial_state(x, ts)
 
         qz0_mean = torch.repeat_interleave(qz0_mean, K, 0)
         qz0_logvar = torch.repeat_interleave(qz0_logvar, K, 0)
 
-        z0, epsilon = self.reparameterize(qz0_mean, qz0_logvar, K)
+        z0, eps = self.reparameterize(qz0_mean, qz0_logvar, K)
 
-        pred_z = self.generate_from_latent(z0, ts, rtol, atol)
+        pred_z = self.generate_from_latent(z0, ts, rtol, atol, method)
         pred_x = self.dec(pred_z)
 
         pred_x = view_with_k(pred_x, K)
         z0 = view_with_k(z0, K)
         qz0_mean = view_with_k(qz0_mean, K)
         qz0_logvar = view_with_k(qz0_logvar, K)
-        epsilon = view_with_k(epsilon, K)
+        eps = view_with_k(eps, K)
 
-        return pred_x, z0, qz0_mean, qz0_logvar, epsilon
+        return pred_x, z0, qz0_mean, qz0_logvar, eps
 
     def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, noise_std=0.1):
         """
@@ -59,7 +59,7 @@ class IWLatentODE(LatentNeuralODE):
 
         data_ll = log_normal_pdf(x, pred_x, noise_logvar).sum(-1).sum(-1)
 
-        const = -0.5 * torch.log(torch.Tensor([2. * math.pi], device=x.device))
+        const = -0.5 * torch.log(torch.Tensor([2. * math.pi]).to(x.device))
         prior_z = torch.sum(const - 0.5 * z0 ** 2, -1)
 
         var_ll = torch.sum(const - 0.5 * qz0_logvar - 0.5 * eps ** 2, -1)
@@ -67,8 +67,7 @@ class IWLatentODE(LatentNeuralODE):
         unnorm_weight = data_ll + prior_z - var_ll
         unnorm_weight_detach = unnorm_weight.detach()
 
-        total_weight = torch.logsumexp(unnorm_weight_detach, 1)
-
+        total_weight = torch.logsumexp(unnorm_weight_detach, 1).unsqueeze(1)
         log_norm_weight = unnorm_weight_detach - total_weight
 
         iwae_elbo = torch.sum(torch.exp(log_norm_weight) * unnorm_weight, -1)
