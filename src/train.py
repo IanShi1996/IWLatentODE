@@ -1,3 +1,5 @@
+import time
+
 import torch
 from torch.nn.utils import clip_grad_norm_
 import matplotlib.pyplot as plt
@@ -16,13 +18,9 @@ class TrainingLoop:
 
         Args:
             model (nn.Module): Model to train.
-            optimizer (torch.optim.Optimizer): Optimizer.
             train_loader (torch.utils.data.Dataloader): Training data loader.
             val_loader (torch.utils.data.Dataloader): Validation data loader.
-            args (dict): Additional training arguments. See below.
-            verbose (bool): Prints verbose out training information.
             plot_func (function): Function used to plot predictions.
-            scheduler (torch._LRScheduler): Learning rate scheduler.
             loss_meters (RunningAverageMeter, RunningAverageMeter):
                 Existing training / val loss average meters.
             loss_hists (list, list): Train/val loss history arrays.
@@ -37,6 +35,8 @@ class TrainingLoop:
 
         self.plot_func = plot_func
         self.execution_arg_history = []
+
+        self.runtimes = []
 
     def init_loss_history(self, loss_hist):
         if loss_hist is None:
@@ -74,13 +74,15 @@ class TrainingLoop:
             args['model_rtol'] (float): Relative tolerance used by ODE solve.
             args['plt_args'] (dict): Plotting arguments.
         """
-        # TODO: Can use better execution tracking.
         self.execution_arg_history.append(args)
 
         atol = args['model_atol'] or 1e-5
         rtol = args['model_rtol'] or 1e-7
 
+        epoch_times = []
         for epoch in range(1, args['max_epoch']+1):
+            start_time = time.time()
+
             for b_data, b_time in self.train_loader:
                 optimizer.zero_grad()
 
@@ -97,6 +99,9 @@ class TrainingLoop:
             if scheduler:
                 scheduler.step()
 
+            end_time = time.time()
+            epoch_times.append(end_time - start_time)
+
             with torch.no_grad():
                 self.update_val_loss(args)
 
@@ -111,6 +116,8 @@ class TrainingLoop:
                 if plt_loss:
                     self.plot_loss()
                 self.print_loss(epoch)
+
+        self.runtimes.append(epoch_times)
 
     def update_val_loss(self, args):
         atol = args['model_atol'] or 1e-5
