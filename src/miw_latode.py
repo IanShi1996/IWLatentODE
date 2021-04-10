@@ -61,7 +61,7 @@ class MIWLatentODE(LatentODE):
         unnorm_weight = data_ll + prior_z - var_ll
         unnorm_weight_detach = unnorm_weight.detach()
 
-        total_weight = torch.logsumexp(unnorm_weight_detach, -1).unsqueeze(1)
+        total_weight = torch.logsumexp(unnorm_weight_detach, -1).unsqueeze(-1)
         log_norm_weight = unnorm_weight_detach - total_weight
 
         iwae_elbo = torch.sum(torch.exp(log_norm_weight) * unnorm_weight, -1)
