@@ -2,7 +2,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-from torchdiffeq import odeint as odeint
+from torchdiffeq import odeint_adjoint as odeint
 
 
 def log_normal_pdf(x, mean, logvar):
@@ -511,7 +511,8 @@ class LatentODE(nn.Module):
         # TODO: add option to expand K / M
         return self.forward(x, ts, 1, 1, rtol, atol, method)[0]
 
-    def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, noise_std=0.1):
+    def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, M, K,
+                 noise_std=0.1):
         """Compute the ELBO.
         Computes the evidence lower bound (ELBO) for a given prediction,
         ground truth, and latent initial state.

@@ -88,7 +88,8 @@ class TrainingLoop:
 
                 out = self.model.forward(b_data, b_time[0], args['M'],
                                          args['K'], rtol, atol, args['method'])
-                elbo = self.model.get_elbo(b_data, *out, args['l_std'])
+                elbo = self.model.get_elbo(b_data, *out, args['M'], args['K'],
+                                           args['l_std'])
 
                 self.train_loss_meter.update(elbo.item())
 

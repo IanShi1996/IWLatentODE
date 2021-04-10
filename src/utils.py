@@ -3,7 +3,11 @@ import torch
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def view_with_k(t, k):
+    # TODO: Merge with view with mk
     return t.view(t.shape[0] // k, k, *t.shape[1:])
+
+def view_with_mk(t, m, k):
+    return t.view(t.shape[0] // (m * k), m, k, *t.shape[1:])
 
 def gpu(t, device=device):
     return torch.Tensor(t).float().to(device)
