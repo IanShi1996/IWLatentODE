@@ -495,7 +495,7 @@ class LatentODE(nn.Module):
         pred_z = self.generate_from_latent(z0, ts, rtol, atol, method)
         pred_x = self.dec(pred_z)
 
-        return pred_x, qz0_mean, qz0_logvar, epsilon
+        return pred_x, z0, qz0_mean, qz0_logvar, epsilon
 
     def get_prediction(self, x, ts, rtol=1e-3, atol=1e-4, method='dopri5'):
         """Retrieve prediction from latent NODE output.
