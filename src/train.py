@@ -128,7 +128,8 @@ class TrainingLoop:
         val_data_tt, val_tp_tt = next(iter(self.val_loader))
         val_out = self.model.forward(val_data_tt, val_tp_tt[0], args['M'],
                                      args['K'], rtol, atol, args['method'])
-        val_elbo = self.model.get_elbo(val_data_tt, *val_out, args['l_std'])
+        val_elbo = self.model.get_elbo(val_data_tt, *val_out, args['M'], 
+                                       args['K'], args['l_std'])
 
         self.val_loss_meter.update(val_elbo.item())
 
