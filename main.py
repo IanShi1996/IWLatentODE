@@ -1,6 +1,8 @@
 import sys, os
 sys.path.append(os.path.abspath('./src'))
+sys.path.append(os.path.abspath('./notebooks'))
 
+from datetime import datetime
 from argparse import ArgumentParser
 
 import torch
@@ -23,7 +25,7 @@ parser.add_argument('--model', type=str, choices=['base', 'iwae', 'miwae',
 parser.add_argument('--M', type=int, required=True)
 parser.add_argument('--K', type=int, required=True)
 parser.add_argument('--beta', type=float, required=False)
-parser.add_argument('--ckpt_int', required=False)
+parser.add_argument('--ckpt_int', type=int, required=False)
 args = parser.parse_args()
 
 data_path = "./data/sine_data_2021-04-09 00:13:41.249505"
@@ -121,5 +123,5 @@ torch.save({
     'model_args': model_args,
     'train_args': train_args,
     'train_obj': main,
-}, out_path)
+}, '{}_{}'.format(out_path, datetime.now()))
 
