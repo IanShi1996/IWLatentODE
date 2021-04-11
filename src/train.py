@@ -89,7 +89,7 @@ class TrainingLoop:
 
     def load_checkpoint(self, ckpt_path=None):
         if ckpt_path is None:
-           ckpt_path = get_checkpoint_path()
+            ckpt_path = get_checkpoint_path()
 
         ckpt = torch.load(ckpt_path)
 
@@ -100,7 +100,7 @@ class TrainingLoop:
         epoch_times = ckpt['epoch_times']
 
         epoch = ckpt['epoch']
-        optim_sd = ckpt['optim_sd']
+        optim_sd = ckpt['optim_state_dict']
         scheduler_sd = ckpt['scheduler_state_dict']
 
         return epoch, epoch_times, optim_sd, scheduler_sd

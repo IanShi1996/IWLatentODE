@@ -13,18 +13,16 @@ from torch.optim.lr_scheduler import ExponentialLR
 device = torch.device('cuda:0')
 
 # Custom lib
-from utils import gpu, asnp
+from utils import gpu
 from model import LatentNeuralODEBuilder
-from train import TrainingLoop
+from train_piw import PIWTrainingLoop
 
 parser = ArgumentParser()
 
-parser.add_argument('--model', type=str, choices=['base', 'iwae', 'miwae',
-                                                  'ciwae'],
+parser.add_argument('--model', type=str, choices=['piwae'],
                     required=True)
 parser.add_argument('--M', type=int, required=True)
 parser.add_argument('--K', type=int, required=True)
-parser.add_argument('--beta', type=float, required=False)
 parser.add_argument('--ckpt_int', type=int, required=False)
 args = parser.parse_args()
 
@@ -85,13 +83,20 @@ model_args = {
 base_model = LatentNeuralODEBuilder(**model_args)
 model = base_model.build_latent_node(args.model).to(device)
 
-main = TrainingLoop(model, train_loader, val_loader)
+main = PIWTrainingLoop(model, train_loader, val_loader)
 
 lr = 5e-3
 
-parameters = (model.parameters())
-optimizer = optim.Adamax(parameters, lr=lr)
-scheduler = ExponentialLR(optimizer, 0.99)
+inf_params = (model.enc.parameters())
+inf_optim = optim.Adamax(inf_params, lr=lr)
+inf_sched = ExponentialLR(inf_optim, 0.99)
+
+node_params = list(model.nodef.parameters())
+dec_params = list(model.dec.parameters())
+gen_params = node_params + dec_params
+
+gen_optim = optim.Adamax(gen_params, lr=lr)
+gen_sched = ExponentialLR(gen_optim, 0.99)
 
 train_args = {
     'max_epoch': 400,
@@ -107,21 +112,18 @@ train_args = {
 
 out_path = './models/sine_{}_lode_{}_{}'.format(args.model, args.M, args.K)
 
-if args.beta:
-    train_args['beta'] = args.beta
-    out_path += '_{}'.format(args.beta)
-
 if args.ckpt_int:
     train_args['ckpt_int'] = args.ckpt_int
 
-main.train(optimizer, train_args, scheduler, plt_traj=False, plt_loss=False)
+main.train(inf_optim, gen_optim, train_args, inf_sched, gen_sched,
+           plt_traj=False, plt_loss=False)
 
 torch.save({
     'model_state_dict': model.state_dict(),
-    'optimizer_state_dict': optimizer.state_dict(),
+    'inf_opt_state_dict': inf_optim.state_dict(),
+    'gen_opt_state_dict': gen_optim.state_dict(),
     'data_path': data_path,
     'model_args': model_args,
     'train_args': train_args,
     'train_obj': main,
 }, '{}_{}'.format(out_path, datetime.now()))
-
