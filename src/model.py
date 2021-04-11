@@ -6,6 +6,8 @@ from iw_latode import IWLatentODE
 from miw_latode import MIWLatentODE
 from ciw_latode import CIWLatentODE
 from piw_latode import PIWLatentODE
+from beta_latode import BetaLatentODE
+
 
 class LatentNeuralODEBuilder:
     """Construct Latent Neural NODE."""
@@ -16,6 +18,7 @@ class LatentNeuralODEBuilder:
         'miwae': MIWLatentODE,
         'ciwae': CIWLatentODE,
         'piwae': PIWLatentODE,
+        'betavae': BetaLatentODE,
     }
 
     def __init__(self, obs_dim, rec_latent_dim, node_latent_dim,
