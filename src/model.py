@@ -4,7 +4,8 @@ from base_model import GRU, ODEFuncNN, EncoderGRUODE, NeuralODE, DecoderNN
 from base_model import LatentODE
 from iw_latode import IWLatentODE
 from miw_latode import MIWLatentODE
-
+from ciw_latode import CIWLatentODE
+from piw_latode import PIWLatentODE
 
 class LatentNeuralODEBuilder:
     """Construct Latent Neural NODE."""
@@ -12,7 +13,9 @@ class LatentNeuralODEBuilder:
     elbo_map = {
         'base': LatentODE,
         'iwae': IWLatentODE,
-        'miwae': MIWLatentODE
+        'miwae': MIWLatentODE,
+        'ciwae': CIWLatentODE,
+        'piwae': PIWLatentODE,
     }
 
     def __init__(self, obs_dim, rec_latent_dim, node_latent_dim,

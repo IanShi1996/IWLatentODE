@@ -2,7 +2,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-from torchdiffeq import odeint_adjoint as odeint
+from torchdiffeq import odeint as odeint
 
 
 def log_normal_pdf(x, mean, logvar):
@@ -150,7 +150,7 @@ class EncoderGRUODE(nn.Module):
         gru (nn.Module): GRU unit used to encode input data.
         node (nn.Module): Neural ODE used to evolve hidden dynamics.
         out (nn.Module): NN mapping from hidden state to output.
-        latent_dum (int): Dimension of latent state.
+        latent_dim (int): Dimension of latent state.
     """
 
     def __init__(self, latent_dim, rec_gru, rec_node, rec_output):
@@ -169,22 +169,16 @@ class EncoderGRUODE(nn.Module):
         self.out = rec_output
         self.latent_dim = latent_dim
 
-    def forward(self, x, tps, mask=None):
+    def forward(self, x, tps):
         """Compute forward pass of GRU-ODE.
         Expects input of shape (B x T x D) and time observation of shape (T).
         Supports input masked by 2D binary array of shape (B x T).
         ODE dynamics are solved using euler's method. Other solvers decrease
         performance and increase runtime.
-        Masked runs require additional tracking. The hidden state should
-        not evolve until data is seen, and should not evolve after the last
-        data point. Currently we track this with an array, but it is not
-        memory efficient. Simple alternatives such as tracking last seen
-        timepoint doesn't work since we need an identical input into the ode
-        solve.
+
         Args:
             x (torch.Tensor): Data observations.
             tps (torch.Tensor): Timepoints.
-            mask (torch.Tensor): 2D masking array.
         Returns:
             torch.Tensor: Output representing latent parameters.
         """
@@ -193,64 +187,18 @@ class EncoderGRUODE(nn.Module):
         # Insert dummy time point which is discarded later.
         tps = torch.cat(((tps[0] - 0.01).unsqueeze(0), tps), 0)
 
-        if mask is not None:
-            h_arr = torch.zeros(x.size(0), x.size(1), h.size(1)).to(x.device)
-            r_fill_mask = self.right_fill_mask(mask)
-
         for i in range(x.size(1)):
             if i != 0:
                 h_ode = odeint(self.node, h, tps[i:i + 2], method="euler")[1]
-
-                if mask is not None:
-                    curr_rmask = r_fill_mask[:, i].view(-1, 1)
-                    h_ode = h_ode * curr_rmask + h * (1 - curr_rmask)
             else:
                 # Don't evolve hidden state prior to first observation
                 h_ode = h
 
             h_rnn = self.gru(x[:, i, :], h_ode)
+            h = h_rnn
 
-            if mask is not None:
-                curr_mask = mask[:, i].view(-1, 1)
-                h = h_rnn * curr_mask + h_ode * (1 - curr_mask)
-
-                h_arr[:, i, :] = h
-            else:
-                h = h_rnn
-
-        if mask is not None:
-            ind = self.get_last_tp(mask)
-            h = torch.zeros(x.size(0), self.latent_dim * 2).to(x.device)
-            for i, traj in enumerate(h_arr):
-                h[i] = traj[ind[i]]
         out = self.out(h)
         return out
-
-    def right_fill_mask(self, mask):
-        """Return mask will all non-leading zeros filled with ones."""
-        mask = mask.detach().clone()
-        for i, row in enumerate(mask):
-            seen = False
-            for j, mp in enumerate(row):
-                if seen:
-                    mask[i][j] = 1
-                elif mp == 1:
-                    mask[i][j] = 0
-                    seen = True
-        return mask
-
-    def get_last_tp(self, mask):
-        """Return index of last observation per trajectory in masked batch."""
-        mask_rev = torch.flip(mask, [1])
-
-        ind = []
-        for mask_row in mask_rev:
-            count = 0
-            while mask_row[count] == 0:
-                count += 1
-            ind.append(mask.size(1) - 1 - count)
-
-        return ind
 
 
 class ODEFuncNN(nn.Module):
@@ -269,7 +217,7 @@ class ODEFuncNN(nn.Module):
             n_hidden (int): Number of hidden units in NN.
             n_layer (int): Number of layers in NN.
             act_type (string): Type of activation to use between layers.
-            n_outputs (int): Dimension of NN output; defaults to input_dim
+            output_dim (int): Dimension of NN output; defaults to input_dim
         Raises:
             ValueError: Thrown when activation function is unknown.
         """
@@ -336,7 +284,7 @@ class NeuralODE(nn.Module):
             ts (torch.Tensor): Time points of observations.
             rtol (float, optional): Relative tolerance of ode solver.
             atol (float, optional): Absolute tolerance of ode solver.
-            TODO
+            method (str, optional): Type of ODE solver used.
         Returns:
             torch.Tensor: Result of ode solve from initial state.
         """
@@ -421,7 +369,7 @@ class LatentODE(nn.Module):
         self.nodef = nodef
         self.dec = dec
 
-    def get_latent_initial_state(self, x, ts, mask=None):
+    def get_latent_initial_state(self, x, ts):
         """Compute latent parameters.
 
         Allows masking via a 2D binary array of shape (B x T).
@@ -436,10 +384,7 @@ class LatentODE(nn.Module):
         obs = torch.flip(x, [1])
         rev_ts = torch.flip(ts, [0])
 
-        if mask is not None:
-            mask = torch.flip(mask, [1])
-
-        out = self.enc.forward(obs, rev_ts, mask)
+        out = self.enc.forward(obs, rev_ts)
 
         qz0_mean = out[:, :out.size(1) // 2]
         qz0_logvar = out[:, out.size(1) // 2:]
@@ -469,30 +414,27 @@ class LatentODE(nn.Module):
             ts (torch.Tensor): Timepoints of observations.
             rtol (float, optional): NODE ODE solver relative tolerance.
             atol (float, optional): NODE ODE solver absolute tolerance.
-            TODO
+            method (str, optional): Type of ODE solver.
         Returns:
             torch.Tensor: Latent trajectory.
         """
         return self.nodef.forward(z0, ts, rtol, atol, method)
 
-    def forward(self, x, ts, M, K, rtol=1e-3, atol=1e-4, method='dopri5'):
+    def forward(self, x, ts, args):
         """Compute forward pass of Latent NODE.
         Args:
             x (torch.Tensor): Input data.
             ts (torch.Tensor): Time points of observations.
-            M TODO
-            K TODO
-            rtol (float, optional): NODE ODE solver relative tolerance.
-            atol (float, optional): NODE ODE solver absolute tolerance.
-            TODO
+            args (dict): Forward arguments.
         Returns:
-            (torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor):
+            (torch.Tensor, torch.Tensor, TODO, torch.Tensor, torch.Tensor):
                 Reconstructed data, latent mean, latent logvar, sampled noise.
         """
         qz0_mean, qz0_logvar = self.get_latent_initial_state(x, ts)
         z0, epsilon = self.reparameterize(qz0_mean, qz0_logvar)
 
-        pred_z = self.generate_from_latent(z0, ts, rtol, atol, method)
+        pred_z = self.generate_from_latent(z0, ts, args['model_rtol'],
+                                           args['model_atol'], args['method'])
         pred_x = self.dec(pred_z)
 
         return pred_x, z0, qz0_mean, qz0_logvar, epsilon
@@ -504,15 +446,22 @@ class LatentODE(nn.Module):
             ts (torch.Tensor): Timepoints of observations.
             rtol (float, optional): NODE ODE solver relative tolerance.
             atol (float, optional): NODE ODE solver absolute tolerance.
-            TODO
+            method (str, optional): Type of ODE solver.
         Returns:
             torch.Tensor: Reconstructed data points.
         """
         # TODO: add option to expand K / M
-        return self.forward(x, ts, 1, 1, rtol, atol, method)[0]
+        args = {
+            'model_rtol': rtol,
+            'model_atol': atol,
+            'method': method,
+            'M': 1,
+            'K': 1,
+        }
 
-    def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, M, K,
-                 noise_std=0.1):
+        return self.forward(x, ts, args)[0]
+
+    def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, args):
         """Compute the ELBO.
         Computes the evidence lower bound (ELBO) for a given prediction,
         ground truth, and latent initial state.
@@ -522,28 +471,20 @@ class LatentODE(nn.Module):
         Args:
             x (torch.Tensor): Input data.
             pred_x (torch.Tensor): Data reconstructed by latent NODE.
-            TODO
+            z0 (torch.Tensor): Reparameterized latent initial states.
             qz0_mean (torch.Tensor): Latent initial state means.
             qz0_logvar (torch.Tensor): Latent initial state variances.
-            noise_std (float, optional): Variance of gaussian pdf.
+            eps (torch.Tensor): Reparameterization noise sample.
+            args (dict): Additional arguments.
         Returns:
             torch.Tensor: ELBO score.
         """
-        noise_std_ = torch.zeros(pred_x.size(), device=x.device) + noise_std
+        noise_std_ = torch.zeros(pred_x.size(), device=x.device) + args['l_std']
         noise_logvar = 2. * torch.log(noise_std_)
 
         logpx = log_normal_pdf(x, pred_x, noise_logvar).sum(-1).sum(-1)
-        pz0_mean = pz0_logvar = torch.zeros(qz0_mean.size(), device=x.device) + 1
-        analytic_kl = normal_kl(qz0_mean, qz0_logvar, pz0_mean, pz0_logvar).sum(-1)
+        pz0_mean = pz0_logvar = torch.zeros(qz0_mean.size(), device=x.device)
+        analytic_kl = normal_kl(qz0_mean, qz0_logvar,
+                                pz0_mean, pz0_logvar).sum(-1)
 
         return torch.mean(-logpx + analytic_kl, dim=0)
-
-    def initialize_normal(self, std=0.1):
-        """Initialize linear layers with normal distribution.
-        Args:
-            std (float): Standard deviation of normal distribution.
-        """
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.normal_(module.weight, mean=0, std=std)
-                nn.init.constant_(module.bias, val=0)

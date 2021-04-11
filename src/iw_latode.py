@@ -10,15 +10,16 @@ class IWLatentODE(LatentODE):
     def __init__(self, enc, nodef, dec):
         super().__init__(enc, nodef, dec)
 
-    def forward(self, x, ts, M, K, rtol=1e-3, atol=1e-4, method='dopri5'):
+    def forward(self, x, ts, args):
+        M, K = args['M'], args['K']
         qz0_mean, qz0_logvar = self.get_latent_initial_state(x, ts)
 
         qz0_mean = torch.repeat_interleave(qz0_mean, K, 0)
         qz0_logvar = torch.repeat_interleave(qz0_logvar, K, 0)
 
         z0, eps = self.reparameterize(qz0_mean, qz0_logvar)
-
-        pred_z = self.generate_from_latent(z0, ts, rtol, atol, method)
+        pred_z = self.generate_from_latent(z0, ts, args['model_rtol'],
+                                           args['model_atol'], args['method'])
         pred_x = self.dec(pred_z)
 
         pred_x = view_with_k(pred_x, K)
@@ -29,8 +30,7 @@ class IWLatentODE(LatentODE):
 
         return pred_x, z0, qz0_mean, qz0_logvar, eps
 
-    def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps,
-                 M, K, noise_std=0.1):
+    def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, args):
         """
 
         Args:
@@ -40,15 +40,15 @@ class IWLatentODE(LatentODE):
             qz0_mean: B x K x H
             qz0_logvar: B x K x H
             eps: B x K x H
-            noise_std: float
+            args: float
 
         Returns:
 
         """
-        x = torch.repeat_interleave(x, K, 0)
-        x = view_with_k(x, K)
+        x = torch.repeat_interleave(x, args['K'], 0)
+        x = view_with_k(x, args['K'])
 
-        noise_std_ = torch.zeros(pred_x.size(), device=x.device) + noise_std
+        noise_std_ = torch.zeros(pred_x.size(), device=x.device) + args['l_std']
         noise_logvar = 2. * torch.log(noise_std_)
 
         data_ll = log_normal_pdf(x, pred_x, noise_logvar).sum(-1).sum(-1)

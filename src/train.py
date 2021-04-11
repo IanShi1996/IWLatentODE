@@ -123,17 +123,16 @@ class TrainingLoop:
             args['clip_norm] (float): Max norm used to clip gradients.
             args['model_atol'] (float): Absolute tolerance used by ODE solve.
             args['model_rtol'] (float): Relative tolerance used by ODE solve.
+            args['method'] (str): ODE solver used for ODE solve.
             args['plt_args'] (dict): Plotting arguments.
+            TODO
         """
         self.execution_arg_history.append(args)
-
-        atol = args['model_atol'] or 1e-5
-        rtol = args['model_rtol'] or 1e-7
 
         start_epoch = 1
         epoch_times = []
 
-        if exists_checkpoint():
+        if 'ckpt_int' in args and exists_checkpoint():
             ckpt = self.load_checkpoint()
 
             start_epoch = ckpt[0]
@@ -143,23 +142,19 @@ class TrainingLoop:
             if scheduler:
                 scheduler.load_state_dict(ckpt[3])
 
-        checkpoint_interval = args['ckpt_int'] or 10
-
         for epoch in range(start_epoch, args['max_epoch']+1):
             start_time = time.time()
 
             for b_data, b_time in self.train_loader:
                 optimizer.zero_grad()
 
-                out = self.model.forward(b_data, b_time[0], args['M'],
-                                         args['K'], rtol, atol, args['method'])
-                elbo = self.model.get_elbo(b_data, *out, args['M'], args['K'],
-                                           args['l_std'])
+                out = self.model.forward(b_data, b_time[0], args)
+                elbo = self.model.get_elbo(b_data, *out, args)
 
                 self.train_loss_meter.update(elbo.item())
 
                 elbo.backward()
-                if args['clip_norm']:
+                if 'clip_norm' in args:
                     clip_grad_norm_(self.model.parameters(), args['clip_norm'])
                 optimizer.step()
             if scheduler:
@@ -184,20 +179,15 @@ class TrainingLoop:
                     self.plot_loss()
                 self.print_loss(epoch)
 
-            if epoch % checkpoint_interval:
+            if 'ckpt_int' in args and epoch % args['ckpt_int']:
                 self.save_checkpoint(optimizer, scheduler, epoch, epoch_times)
 
         self.runtimes.append(epoch_times)
 
     def update_val_loss(self, args):
-        atol = args['model_atol'] or 1e-5
-        rtol = args['model_rtol'] or 1e-7
-
         val_data_tt, val_tp_tt = next(iter(self.val_loader))
-        val_out = self.model.forward(val_data_tt, val_tp_tt[0], args['M'],
-                                     args['K'], rtol, atol, args['method'])
-        val_elbo = self.model.get_elbo(val_data_tt, *val_out, args['M'],
-                                       args['K'], args['l_std'])
+        val_out = self.model.forward(val_data_tt, val_tp_tt[0], args)
+        val_elbo = self.model.get_elbo(val_data_tt, *val_out, args)
 
         self.val_loss_meter.update(val_elbo.item())
 

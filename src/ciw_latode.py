@@ -1,17 +1,16 @@
 import math
 import torch
 
-from base_model import LatentODE, log_normal_pdf
+from base_model import LatentODE, log_normal_pdf, normal_kl
 from utils import view_with_mk
 
 
-class MIWLatentODE(LatentODE):
+class CIWLatentODE(LatentODE):
     def __init__(self, enc, nodef, dec):
         super().__init__(enc, nodef, dec)
 
     def forward(self, x, ts, args):
         M, K = args['M'], args['K']
-
         qz0_mean, qz0_logvar = self.get_latent_initial_state(x, ts)
 
         qz0_mean = torch.repeat_interleave(qz0_mean, M * K, 0)
@@ -32,6 +31,37 @@ class MIWLatentODE(LatentODE):
         return pred_x, z0, qz0_mean, qz0_logvar, eps
 
     def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, args):
+        iwae_elbo = self.get_iwae_elbo(x, pred_x, z0, qz0_mean, qz0_logvar,
+                                       eps, args)
+
+        # Compress K dimension
+        pred_x = torch.mean(pred_x, 2)
+        z0 = torch.mean(pred_x, 2)
+        qz0_mean = torch.mean(qz0_mean, 2)
+        qz0_logvar = torch.mean(qz0_logvar, 2)
+        eps = torch.mean(eps, 2)
+
+        normal_elbo = self.get_standard_elbo(x, pred_x, z0, qz0_mean,
+                                             qz0_logvar, eps, args)
+
+        return args['beta'] * normal_elbo + (1 - args['beta']) * iwae_elbo
+
+    def get_standard_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, args):
+        x = torch.repeat_interleave(x, args['M'], 0)
+        x = x.view((x.shape[0] // args['M'], args['M'], *x.shape[1:]))
+
+        noise_std_ = torch.zeros(pred_x.size(), device=x.device) + args['l_std']
+        noise_logvar = 2. * torch.log(noise_std_)
+
+        logpx = log_normal_pdf(x, pred_x, noise_logvar).sum(-1).sum(-1)
+
+        pz0_mean = pz0_logvar = torch.zeros(qz0_mean.size(), device=x.device)
+        analytic_kl = normal_kl(qz0_mean, qz0_logvar,
+                                pz0_mean, pz0_logvar).sum(-1)
+
+        return torch.mean(-logpx + analytic_kl)
+
+    def get_iwae_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, args):
         """
 
         Args:
@@ -41,7 +71,7 @@ class MIWLatentODE(LatentODE):
             qz0_mean: B x M x K x H
             qz0_logvar: B x M x K x H
             eps: B x M x K x H
-            args: dict
+            args: float
 
         Returns:
 

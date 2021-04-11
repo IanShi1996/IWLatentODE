@@ -10,5 +10,8 @@
 
 source activate diffeq
 
-python ~/Documents/IWLatentODE/main.py
-
+if [ "$#" -eq 4 ]; then
+    python ~/Documents/IWLatentODE/main.py --model $1 --M $2 --K $3 --ckpt_int $4
+elif [ "$#" -eq 5 ]; then
+    python ~/Documents/IWLatentODE/main.py --model $1 --M $2 --K $3 --beta $4 --ckpt_int $5
+fi
