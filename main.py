@@ -19,6 +19,7 @@ from train import TrainingLoop
 
 parser = ArgumentParser()
 
+parser.add_argument('--data', type=str, required=True)
 parser.add_argument('--model', type=str, choices=['base', 'iwae', 'miwae',
                                                   'ciwae', 'betavae'],
                     required=True)
@@ -28,14 +29,33 @@ parser.add_argument('--beta', type=float, required=False)
 parser.add_argument('--ckpt_int', type=int, required=False)
 args = parser.parse_args()
 
-data_path = "./data/sine_data_2021-04-09 00:13:41.249505"
-generator = torch.load(data_path)['generator']
+data_dict = {
+    "sine": "./data/sine_data_2021-04-09 00:13:41.249505",
+    "aussign": "./data/aussign_parsed",
+}
 
-train_time, train_data = generator.get_train_set()
-val_time, val_data = generator.get_val_set()
+data_path = data_dict[args.data]
 
-train_data = train_data.reshape(len(train_data), -1, 1)
-val_data = val_data.reshape(len(val_data), -1, 1)
+if args.data == "sine":
+    generator = torch.load(data_path)['generator']
+
+    train_time, train_data = generator.get_train_set()
+    val_time, val_data = generator.get_val_set()
+
+    train_data = train_data.reshape(len(train_data), -1, 1)
+    val_data = val_data.reshape(len(val_data), -1, 1)
+
+elif args.data == "aussign":
+    data = torch.load(data_path)
+
+    train_data = data["train_dataset"]
+    val_data = data["val_dataset"]
+
+    train_time = list(range(train_data.shape[1]))
+    val_time = list(range(val_data.shape[1]))
+else:
+    raise ValueError("Invalid Dataset.")
+
 
 train_data_tt = gpu(train_data)
 train_time_tt = gpu(train_time)
@@ -44,7 +64,7 @@ val_data_tt = gpu(val_data)
 val_time_tt = gpu(val_time)
 
 
-class SineSet(Dataset):
+class GenericSet(Dataset):
     def __init__(self, data, time):
         self.data = data
         self.time = time
@@ -56,23 +76,23 @@ class SineSet(Dataset):
         return self.data[idx], self.time
 
 
-train_dataset = SineSet(train_data_tt, train_time_tt)
-val_dataset = SineSet(val_data_tt, val_time_tt)
+train_dataset = GenericSet(train_data_tt, train_time_tt)
+val_dataset = GenericSet(val_data_tt, val_time_tt)
 
 train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True)
 val_loader = DataLoader(train_dataset, batch_size=len(val_dataset))
 
 model_args = {
-    'obs_dim': 1,
-    'rec_latent_dim': 8,
-    'node_latent_dim': 4,
+    'obs_dim': 22,
+    'rec_latent_dim': 50,
+    'node_latent_dim': 25,
 
-    'rec_gru_unit': 100,
-    'rec_node_hidden': 100,
+    'rec_gru_unit': 150,
+    'rec_node_hidden': 150,
     'rec_node_layer': 2,
     'rec_node_act': 'Tanh',
 
-    'latent_node_hidden': 100,
+    'latent_node_hidden': 150,
     'latent_node_layer': 2,
     'latent_node_act': 'Tanh',
 
@@ -91,21 +111,20 @@ lr = 5e-3
 
 parameters = (model.parameters())
 optimizer = optim.Adamax(parameters, lr=lr)
-scheduler = ExponentialLR(optimizer, 0.99)
+scheduler = ExponentialLR(optimizer, 0.9925)
 
 train_args = {
-    'max_epoch': 400,
+    'max_epoch': 750,
     'l_std': 0.1,
     'clip_norm': 5,
     'model_atol': 1e-4,
     'model_rtol': 1e-3,
-    'plt_args': {'n_plot': 2},
     'M': args.M,
     'K': args.K,
     'method': 'dopri5',
 }
 
-out_path = './models/sine_{}_lode_{}_{}'.format(args.model, args.M, args.K)
+out_path = './models/{}_{}_lode_{}_{}'.format(args.data, args.model, args.M, args.K)
 
 if args.beta:
     train_args['beta'] = args.beta
