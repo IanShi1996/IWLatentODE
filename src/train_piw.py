@@ -92,7 +92,7 @@ class PIWTrainingLoop(TrainingLoop):
                 opt1.zero_grad()
                 out_miwae = self.model.forward(b_data, b_time[0], args)
                 _, miwae_elbo = self.model.get_elbo(b_data, *out_miwae, args)
-                miwae_elbo.backward(retain_graph=True)
+                miwae_elbo.backward()
 
                 if 'clip_norm' in args:
                     inf_params = self.model.enc.parameters()
@@ -155,4 +155,3 @@ class PIWTrainingLoop(TrainingLoop):
 
         mean_elbo = (val_elbos[0] + val_elbos[1]) / 2
         self.val_loss_meter.update(mean_elbo.item())
-
