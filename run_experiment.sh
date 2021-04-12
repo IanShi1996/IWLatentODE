@@ -10,12 +10,6 @@
 
 source activate diffeq
 
-
-if [ $2 == "piwae" ]; then
-    python ./main_piwae.py --data $1 --model $2 --M $3 --K $4 --ckpt_int $5
-    exit 0
-fi
-
 if [ "$#" -eq 5 ]; then
     python ./main.py --data $1 --model $2 --M $3 --K $4 --ckpt_int $5
 elif [ "$#" -eq 6 ]; then
