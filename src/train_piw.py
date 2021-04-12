@@ -83,35 +83,39 @@ class PIWTrainingLoop(TrainingLoop):
 
         for epoch in range(start_epoch, args['max_epoch']+1):
             start_time = time.time()
-
             for b_data, b_time in self.train_loader:
-                # Don't have a more elegant method of doing PIWAE for now. Will
-                # fix later.
+                # Don't have a more elegant method of doing PIWAE for now.
+                # Will fix later.
 
-                # Inference network optimization
                 opt1.zero_grad()
-                out_miwae = self.model.forward(b_data, b_time[0], args)
-                _, miwae_elbo = self.model.get_elbo(b_data, *out_miwae, args)
-                miwae_elbo.backward()
+                opt2.zero_grad()
+
+                out = self.model.forward(b_data, b_time[0], args)
+
+                iwae_elbo, miwae_elbo = self.model.get_elbo(b_data, *out, args)
+                miwae_elbo.backward(retain_graph=True)
+
+                opt2.zero_grad()
+
+                for param in self.model.enc.parameters():
+                    param.requires_grad = False
+
+                iwae_elbo.backward()
+
+                for param in self.model.enc.parameters():
+                    param.requires_grad = True
 
                 if 'clip_norm' in args:
                     inf_params = self.model.enc.parameters()
-                    clip_grad_norm_(inf_params, args['clip_norm'])
-                opt1.step()
 
-                # Generative network optimization
-                opt2.zero_grad()
-                out_iwae = self.model.forward(b_data, b_time[0], args)
-                iwae_elbo, _ = self.model.get_elbo(b_data, *out_iwae, args)
-                iwae_elbo.backward()
-
-                if 'clip_norm' in args:
                     node_params = list(self.model.nodef.parameters())
                     dec_params = list(self.model.dec.parameters())
                     gen_params = node_params + dec_params
 
                     clip_grad_norm_(gen_params, args['clip_norm'])
+                    clip_grad_norm_(inf_params, args['clip_norm'])
 
+                opt1.step()
                 opt2.step()
 
                 avg_elbo = (iwae_elbo + miwae_elbo) / 2
