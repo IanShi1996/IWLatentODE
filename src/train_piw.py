@@ -85,19 +85,24 @@ class PIWTrainingLoop(TrainingLoop):
             start_time = time.time()
 
             for b_data, b_time in self.train_loader:
+                # Don't have a more elegant method of doing PIWAE for now. Will
+                # fix later.
 
-                out = self.model.forward(b_data, b_time[0], args)
-                iwae_elbo, miwae_elbo = self.model.get_elbo(b_data, *out, args)
-
+                # Inference network optimization
                 opt1.zero_grad()
-                miwae_elbo.backward()
+                out_miwae = self.model.forward(b_data, b_time[0], args)
+                _, miwae_elbo = self.model.get_elbo(b_data, *out_miwae, args)
+                miwae_elbo.backward(retain_graph=True)
 
                 if 'clip_norm' in args:
                     inf_params = self.model.enc.parameters()
                     clip_grad_norm_(inf_params, args['clip_norm'])
                 opt1.step()
 
+                # Generative network optimization
                 opt2.zero_grad()
+                out_iwae = self.model.forward(b_data, b_time[0], args)
+                iwae_elbo, _ = self.model.get_elbo(b_data, *out_iwae, args)
                 iwae_elbo.backward()
 
                 if 'clip_norm' in args:
@@ -106,6 +111,7 @@ class PIWTrainingLoop(TrainingLoop):
                     gen_params = node_params + dec_params
 
                     clip_grad_norm_(gen_params, args['clip_norm'])
+
                 opt2.step()
 
                 avg_elbo = (iwae_elbo + miwae_elbo) / 2
@@ -141,3 +147,12 @@ class PIWTrainingLoop(TrainingLoop):
                                      epoch_times)
 
         self.runtimes.append(epoch_times)
+
+    def update_val_loss(self, args):
+        val_data_tt, val_tp_tt = next(iter(self.val_loader))
+        val_out = self.model.forward(val_data_tt, val_tp_tt[0], args)
+        val_elbos = self.model.get_elbo(val_data_tt, *val_out, args)
+
+        mean_elbo = (val_elbos[0] + val_elbos[1]) / 2
+        self.val_loss_meter.update(mean_elbo.item())
+

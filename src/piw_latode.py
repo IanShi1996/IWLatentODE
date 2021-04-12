@@ -25,24 +25,33 @@ class PIWLatentODE(LatentODE):
                                            args['model_atol'], args['method'])
         pred_x = self.dec(pred_z)
 
-        pred_x = view_with_mk(pred_x, M, K)
-        z0 = view_with_mk(z0, M, K)
-        qz0_mean = view_with_mk(qz0_mean, M, K)
-        qz0_logvar = view_with_mk(qz0_logvar, M, K)
-        eps = view_with_mk(eps, M, K)
-
         return pred_x, z0, qz0_mean, qz0_logvar, eps
 
     def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, args):
-        miwae_elbo = self.get_iwae_elbo(x, pred_x, z0, qz0_mean, qz0_logvar,
-                                        eps, args)
+        M, K = args['M'], args['K']
+
+        pred_x_miwae = view_with_mk(pred_x, M, K)
+        z0_miwae = view_with_mk(z0, M, K)
+        qz0_mean_miwae = view_with_mk(qz0_mean, M, K)
+        qz0_logvar_miwae = view_with_mk(qz0_logvar, M, K)
+        eps_miwae = view_with_mk(eps, M, K)
+
+        miwae_elbo = self.get_iwae_elbo(x, pred_x_miwae, z0_miwae,
+                                        qz0_mean_miwae, qz0_logvar_miwae,
+                                        eps_miwae, args)
 
         temp_args = args.copy()
         temp_args['K'] = args['M'] * args['K']
         temp_args['M'] = 1
 
-        iwae_elbo = self.get_iwae_elbo(x, pred_x, z0, qz0_mean, qz0_logvar,
-                                       eps, temp_args)
+        pred_x_iwae = view_with_mk(pred_x, 1, M * K)
+        z0_iwae = view_with_mk(z0, 1, M * K)
+        qz0_mean_iwae = view_with_mk(qz0_mean, 1, M * K)
+        qz0_logvar_iwae = view_with_mk(qz0_logvar, 1, M * K)
+        eps_iwae = view_with_mk(eps, 1, M * K)
+
+        iwae_elbo = self.get_iwae_elbo(x, pred_x_iwae, z0_iwae, qz0_mean_iwae,
+                                       qz0_logvar_iwae, eps_iwae, temp_args)
 
         return iwae_elbo, miwae_elbo
 
@@ -66,7 +75,6 @@ class PIWLatentODE(LatentODE):
 
         noise_std_ = torch.zeros(pred_x.size(), device=x.device) + args['l_std']
         noise_logvar = 2. * torch.log(noise_std_)
-
         data_ll = log_normal_pdf(x, pred_x, noise_logvar).sum(-1).sum(-1)
 
         const = -0.5 * torch.log(torch.Tensor([2. * math.pi]).to(x.device))
