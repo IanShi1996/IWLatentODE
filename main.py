@@ -20,7 +20,7 @@ from train import TrainingLoop
 parser = ArgumentParser()
 
 parser.add_argument('--model', type=str, choices=['base', 'iwae', 'miwae',
-                                                  'ciwae'],
+                                                  'ciwae', 'betavae'],
                     required=True)
 parser.add_argument('--M', type=int, required=True)
 parser.add_argument('--K', type=int, required=True)
