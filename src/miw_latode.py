@@ -1,71 +1,62 @@
-import math
 import torch
 
-from base_model import LatentODE, log_normal_pdf
-from utils import view_with_mk
+from base_model import LatentODE
+from estimators import get_miw_elbo
+from utils import reshape_all_by_args, reshape_by_args, mean_samples_all
 
 
 class MIWLatentODE(LatentODE):
+    """
+    Multiply Importance-Weighted Latent ODE. Uses multiple
+    estimates of ELBO made construction from importance-weighted
+    samples to address gradient estimator accuracy issues caused by
+    importance sampling. See: https://arxiv.org/pdf/1802.04537.pdf.
+    """
     def __init__(self, enc, nodef, dec):
         super().__init__(enc, nodef, dec)
 
-    def forward(self, x, ts, args):
-        M, K = args['M'], args['K']
+    def forward(self, x, ts, args, mean=False):
+        """Compute MIWLatent ODE forward pass.
 
+        Data is output in preparation for ELBO computation. First three
+        dimensions of output Tensors are B x M x K, where B is batch size,
+        M is number of ELBO samples, and K is number of importance samples.
+
+        Alternatively, mean flag results in output of mean values for all
+        outputs.
+
+        Args:
+            x (torch.Tensor): Observed data.
+            ts (torch.Tensor): Times of observation.
+            args (dict): Additional arguments.
+                args['model_rtol'] (float): ODE solve relative tolerance.
+                args['model_atol'] (float): ODE solve absolute tolerance.
+                args['method'] (string): ODE solver.
+                args['M'] (int): Number of ELBO samples.
+                args['K'] (int): Number of importance samples.
+            mean (boolean): Returns mean output if true.
+
+        Returns:
+            (torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor):
+                Predicted data, latent initial states, variational posterior
+                means, variational posterior log variances.
+        """
         qz0_mean, qz0_logvar = self.get_latent_initial_state(x, ts)
 
-        qz0_mean = torch.repeat_interleave(qz0_mean, M * K, 0)
-        qz0_logvar = torch.repeat_interleave(qz0_logvar, M * K, 0)
+        n_samp = args['M'] * args['K']
+        qz0_mean = torch.repeat_interleave(qz0_mean, n_samp, 0)
+        qz0_logvar = torch.repeat_interleave(qz0_logvar, n_samp, 0)
 
-        z0, eps = self.reparameterize(qz0_mean, qz0_logvar)
-
+        z0, _ = self.reparameterize(qz0_mean, qz0_logvar)
         pred_z = self.generate_from_latent(z0, ts, args['model_rtol'],
                                            args['model_atol'], args['method'])
         pred_x = self.dec(pred_z)
 
-        pred_x = view_with_mk(pred_x, M, K)
-        z0 = view_with_mk(z0, M, K)
-        qz0_mean = view_with_mk(qz0_mean, M, K)
-        qz0_logvar = view_with_mk(qz0_logvar, M, K)
-        eps = view_with_mk(eps, M, K)
+        out = reshape_all_by_args(pred_x, z0, qz0_mean, qz0_logvar, args=args)
+        out = mean_samples_all(*out) if mean else out
 
-        return pred_x, z0, qz0_mean, qz0_logvar, eps
+        return out
 
-    def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, args):
-        """
-
-        Args:
-            x: B x L x D
-            pred_x: B x M x K x L x D
-            z0: B x M x K x H
-            qz0_mean: B x M x K x H
-            qz0_logvar: B x M x K x H
-            eps: B x M x K x H
-            args: dict
-
-        Returns:
-
-        """
-        x = torch.repeat_interleave(x, args['M'] * args['K'], 0)
-        x = view_with_mk(x, args['M'], args['K'])
-
-        noise_std_ = torch.zeros(pred_x.size(), device=x.device) + args['l_std']
-        noise_logvar = 2. * torch.log(noise_std_)
-
-        data_ll = log_normal_pdf(x, pred_x, noise_logvar).sum(-1).sum(-1)
-
-        const = -0.5 * torch.log(torch.Tensor([2. * math.pi]).to(x.device))
-        prior_z = torch.sum(const - 0.5 * z0 ** 2, -1)
-
-        var_ll = torch.sum(const - 0.5 * qz0_logvar - 0.5 * eps ** 2, -1)
-
-        unnorm_weight = data_ll + prior_z - var_ll
-        unnorm_weight_detach = unnorm_weight.detach()
-
-        total_weight = torch.logsumexp(unnorm_weight_detach, -1).unsqueeze(-1)
-        log_norm_weight = unnorm_weight_detach - total_weight
-
-        iwae_elbo = torch.sum(torch.exp(log_norm_weight) * unnorm_weight, -1)
-        iwae_elbo = -torch.mean(iwae_elbo)
-
-        return iwae_elbo
+    def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, args):
+        x = reshape_by_args(x, args, repeat=True)
+        return get_miw_elbo(x, pred_x, z0, qz0_mean, qz0_logvar, args)

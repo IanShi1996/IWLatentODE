@@ -125,7 +125,7 @@ class TrainingLoop:
             args['model_rtol'] (float): Relative tolerance used by ODE solve.
             args['method'] (str): ODE solver used for ODE solve.
             args['plt_args'] (dict): Plotting arguments.
-            TODO
+            args['ckpt_int'] (int): Number of epochs between checkpoints.
         """
         self.execution_arg_history.append(args)
 
@@ -207,4 +207,3 @@ class TrainingLoop:
     def plot_val_traj(self, args):
         val_data_tt, val_tp_tt = next(iter(self.val_loader))
         self.plot_func(self.model, val_data_tt, val_tp_tt, **args)
-

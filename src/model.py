@@ -2,11 +2,9 @@ import torch.nn as nn
 from base_model import GRU, ODEFuncNN, EncoderGRUODE, NeuralODE, DecoderNN
 
 from base_model import LatentODE
-from iw_latode import IWLatentODE
 from miw_latode import MIWLatentODE
 from ciw_latode import CIWLatentODE
 from piw_latode import PIWLatentODE
-from beta_latode import BetaLatentODE
 
 
 class LatentNeuralODEBuilder:
@@ -14,11 +12,11 @@ class LatentNeuralODEBuilder:
 
     elbo_map = {
         'base': LatentODE,
-        'iwae': IWLatentODE,
-        'miwae': MIWLatentODE,
-        'ciwae': CIWLatentODE,
-        'piwae': PIWLatentODE,
-        'betavae': BetaLatentODE,
+        'iw': MIWLatentODE,
+        'miw': MIWLatentODE,
+        'ciw': CIWLatentODE,
+        'piw': PIWLatentODE,
+        'betavae': LatentODE,
     }
 
     def __init__(self, obs_dim, rec_latent_dim, node_latent_dim,
@@ -84,7 +82,7 @@ class LatentNeuralODEBuilder:
         """
         try:
             model = self.elbo_map[elbo_type]
-        except:
+        except KeyError:
             raise ValueError("Unknown elbo type.")
 
         return model(self.enc, self.latent_node, self.dec)

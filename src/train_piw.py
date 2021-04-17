@@ -54,14 +54,21 @@ class PIWTrainingLoop(TrainingLoop):
 
     def train(self, opt1, opt2, args, sche1=None, sche2=None, verbose=True,
               plt_traj=False, plt_loss=False):
-        """
+        """Trains PIWLatent ODE.
+
+        Uses two separate optimizers to optimize recognition and generative
+        network according to two separate losses. There should be a better
+        way of doing this, but I don't know how!
 
         Args:
-            opt1: Optimizes Encoder Network (inference)
-            opt2: Optimizes Decoder Network (generative)
-
-        Returns:
-
+            opt1 (torch.optim.Optimizer): Optimizes Recognition Network.
+            opt2 (torch.optim.Optimizer): Optimizes Generative Network.
+            args (dict): Training arguments
+            sche1 (torch._LRScheduler): Learning rate scheduler for opt1.
+            sche2 (torch._LRScheduler): Learning rate scheduler for opt2.
+            verbose (bool): Prints verbose out training information.
+            plt_traj (bool): Plot reconstructions.
+            plt_loss (bool): Plot loss history.
         """
         self.execution_arg_history.append(args)
 

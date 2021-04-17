@@ -1,75 +1,13 @@
-import numpy as np
-
 import torch
 import torch.nn as nn
 from torchdiffeq import odeint as odeint
 
-
-def log_normal_pdf(x, mean, logvar):
-    """Compute log pdf of data under gaussian specified by parameters.
-    Implementation taken from: https://github.com/rtqichen/torchdiffeq.
-    Args:
-        x (torch.Tensor): Observed data points.
-        mean (torch.Tensor): Mean of gaussian distribution.
-        logvar (torch.Tensor): Log variance of gaussian distribution.
-    Returns:
-        torch.Tensor: Log probability of data under specified gaussian.
-    """
-    const = torch.from_numpy(np.array([2. * np.pi])).float().to(x.device)
-    const = torch.log(const)
-
-    return -.5 * (const + logvar + (x - mean) ** 2. / torch.exp(logvar))
-
-
-def normal_kl(mu1, lv1, mu2, lv2):
-    """Compute analytic KL divergence between two gaussian distributions.
-    Computes analytic KL divergence between two multivariate gaussians which
-    are parameterized by the given mean and variances. All inputs must have
-    the same dimension.
-    Implementation taken from: https://github.com/rtqichen/torchdiffeq.
-    Args:
-        mu1 (torch.Tensor): Mean of first gaussian distribution.
-        lv1 (torch.Tensor): Log variance of first gaussian distribution.
-        mu2 (torch.Tensor): Mean of second gaussian distribution.
-        lv2 (torch.Tensor): Log variance of second gaussian distribution.
-    Returns:
-        torch.Tensor: Analytic KL divergence between given distributions.
-    """
-    v1 = torch.exp(lv1)
-    v2 = torch.exp(lv2)
-    lstd1 = lv1 / 2.
-    lstd2 = lv2 / 2.
-
-    kl = lstd2 - lstd1 + ((v1 + (mu1 - mu2) ** 2.) / (2. * v2)) - .5
-    return kl
-
-
-class Swish(nn.Module):
-    """Swish activation function.
-    Implements swish activation function: https://arxiv.org/pdf/1710.05941.pdf.
-    Claimed by NODE authors to perform well in NODEs.
-    """
-
-    def __init__(self):
-        """Initialize swish activation function."""
-        super(Swish, self).__init__()
-
-    def forward(self, x, beta=1):
-        """Compute swish forward pass.
-        Args:
-            x (torch.Tensor): Input data.
-            beta (float, optional): Scaling factor. Defaults to 1.
-        Returns:
-            torch.Tensor: Data with swish non-linearity applied.
-        """
-        return x * torch.sigmoid(beta * x)
+from estimators import get_analytic_elbo
 
 
 ACTIVATION_DICT = {
-    'Swish': Swish,
     'Tanh': nn.Tanh,
     'ReLU': nn.ReLU,
-    'Softplus': nn.Softplus
 }
 
 
@@ -259,7 +197,6 @@ class ODEFuncNN(nn.Module):
 class NeuralODE(nn.Module):
     """Neural Ordinary Differential Equation.
     Implements Neural ODEs as described by: https://arxiv.org/abs/1806.07366.
-    ODE solve uses a semi-norm. See: https://arxiv.org/abs/2009.09457.
 
     Attributes:
         nodef (nn.Module): NN which approximates ODE function.
@@ -377,7 +314,6 @@ class LatentODE(nn.Module):
         Args:
             x (torch.Tensor): Data points.
             ts (torch.Tensor): Timepoints of observations.
-            mask (torch.Tensor, optional): Masking array.
         Returns:
             torch.Tensor, torch.Tensor: Latent mean and logvar parameters.
         """
@@ -427,64 +363,59 @@ class LatentODE(nn.Module):
             ts (torch.Tensor): Time points of observations.
             args (dict): Forward arguments.
         Returns:
-            (torch.Tensor, torch.Tensor, TODO, torch.Tensor, torch.Tensor):
-                Reconstructed data, latent mean, latent logvar, sampled noise.
+            (torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor):
+                Predicted data, latent initial states, variational posterior
+                means, variational posterior log variances.
         """
         qz0_mean, qz0_logvar = self.get_latent_initial_state(x, ts)
-        z0, epsilon = self.reparameterize(qz0_mean, qz0_logvar)
+        z0, _ = self.reparameterize(qz0_mean, qz0_logvar)
 
         pred_z = self.generate_from_latent(z0, ts, args['model_rtol'],
                                            args['model_atol'], args['method'])
         pred_x = self.dec(pred_z)
 
-        return pred_x, z0, qz0_mean, qz0_logvar, epsilon
+        return pred_x, z0, qz0_mean, qz0_logvar
 
-    def get_prediction(self, x, ts, rtol=1e-3, atol=1e-4, method='dopri5'):
+    def get_prediction(self, x, ts, args=None):
         """Retrieve prediction from latent NODE output.
         Args:
             x (torch.Tensor): Data points.
             ts (torch.Tensor): Timepoints of observations.
-            rtol (float, optional): NODE ODE solver relative tolerance.
-            atol (float, optional): NODE ODE solver absolute tolerance.
-            method (str, optional): Type of ODE solver.
+            args (dict): Prediction arguments.
+                args['M'] (int): Number of ELBO samples.
+                args['K'] (int): Number of importance samples.
+                args['model_rtol'] (float): NODE ODE solver relative tolerance.
+                args['model_atol'] (float): NODE ODE solver absolute tolerance.
+                args['method'] (str): Type of ODE solver.
         Returns:
             torch.Tensor: Reconstructed data points.
         """
-        # TODO: add option to expand K / M
-        args = {
-            'model_rtol': rtol,
-            'model_atol': atol,
-            'method': method,
-            'M': 1,
-            'K': 1,
-        }
+        if args is None:
+            args = {
+                'M': 1,
+                'K': 1,
+                'model_rtol': 1e-3,
+                'model_atol': 1e-4,
+                'method': 'dopri5'
+            }
 
         return self.forward(x, ts, args)[0]
 
-    def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, eps, args):
+    def get_elbo(self, x, pred_x, z0, qz0_mean, qz0_logvar, args):
         """Compute the ELBO.
+
         Computes the evidence lower bound (ELBO) for a given prediction,
         ground truth, and latent initial state.
-        Supports KL annealing, where the KL term can gradually be increased
-        during training, as described in: https://arxiv.org/abs/1903.10145.
 
         Args:
             x (torch.Tensor): Input data.
-            pred_x (torch.Tensor): Data reconstructed by latent NODE.
-            z0 (torch.Tensor): Reparameterized latent initial states.
-            qz0_mean (torch.Tensor): Latent initial state means.
-            qz0_logvar (torch.Tensor): Latent initial state variances.
-            eps (torch.Tensor): Reparameterization noise sample.
+            pred_x (torch.Tensor): Data reconstructed by Latent NODE.
+            z0 (torch.Tensor): Sampled latent initial states.
+            qz0_mean (torch.Tensor): Variational posterior means.
+            qz0_logvar (torch.Tensor): Variational posterior log variances.
             args (dict): Additional arguments.
+
         Returns:
-            torch.Tensor: ELBO score.
+            torch.Tensor: ELBO.
         """
-        noise_std_ = torch.zeros(pred_x.size(), device=x.device) + args['l_std']
-        noise_logvar = 2. * torch.log(noise_std_)
-
-        logpx = log_normal_pdf(x, pred_x, noise_logvar).sum(-1).sum(-1)
-        pz0_mean = pz0_logvar = torch.zeros(qz0_mean.size(), device=x.device)
-        analytic_kl = normal_kl(qz0_mean, qz0_logvar,
-                                pz0_mean, pz0_logvar).sum(-1)
-
-        return torch.mean(-logpx + analytic_kl, dim=0)
+        return get_analytic_elbo(x, pred_x, qz0_mean, qz0_logvar, args)
