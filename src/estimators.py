@@ -124,11 +124,14 @@ def get_miw_elbo(x, pred_x, z0, qz0_mean, qz0_logvar, args):
     log_pz0 = log_normal_pdf(z0, zero_mean, one_logvar).sum(-1)
     log_qz0Cx = log_normal_pdf(z0, qz0_mean, qz0_logvar).sum(-1)
 
-    log_iw = log_pxCz0 + log_pz0 - log_qz0Cx
+    unnorm_weight = log_pxCz0 + log_pz0 - log_qz0Cx
 
-    iw_elbo = torch.logsumexp(log_iw, -1)
-    k_const = torch.ones_like(iw_elbo, device=x.device) * args['K']
-    miw_elbo = -1 * torch.mean(iw_elbo - torch.log(k_const))
+    unnorm_weight_detach = unnorm_weight.detach()
+    total_weight = torch.logsumexp(unnorm_weight_detach, -1).unsqueeze(-1)
+    log_norm_weight = unnorm_weight_detach - total_weight
+
+    iw_elbo = torch.sum(torch.exp(log_norm_weight) * unnorm_weight, -1)
+    miw_elbo = -torch.mean(iw_elbo)
 
     return miw_elbo
 

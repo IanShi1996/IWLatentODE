@@ -1,9 +1,6 @@
 import os
 import sys
 
-sys.path.append(os.path.abspath('./src'))
-sys.path.append(os.path.abspath('./notebooks'))
-
 from datetime import datetime
 from argparse import ArgumentParser
 
@@ -12,6 +9,9 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import ExponentialLR
 
 device = torch.device('cuda:0')
+
+sys.path.append(os.path.abspath('./src'))
+sys.path.append(os.path.abspath('./notebooks'))
 
 # Custom lib
 from model import LatentNeuralODEBuilder
@@ -22,8 +22,8 @@ from data_utils import get_dataloaders, DATA_PATH_DICT
 parser = ArgumentParser()
 
 parser.add_argument('--data', type=str, required=True)
-parser.add_argument('--model', type=str, choices=['base', 'iwae', 'miwae',
-                                                  'ciwae', 'betavae', 'piwae'],
+parser.add_argument('--model', type=str, choices=['base', 'iw', 'miw', 'ciw',
+                                                  'betavae', 'piw'],
                     required=True)
 parser.add_argument('--M', type=int, required=True)
 parser.add_argument('--K', type=int, required=True)
@@ -31,10 +31,35 @@ parser.add_argument('--beta', type=float, required=False)
 parser.add_argument('--ckpt_int', type=int, required=False)
 args = parser.parse_args()
 
-batch_size = 128
+print_exp = "Experiment: {} {} {} ".format(args.model, args.M, args.K)
+if args.beta:
+    print_exp += str(args.beta)
+print(print_exp)
+
+batch_size = 256
 train_loader, val_loader = get_dataloaders(args.data, batch_size)
 
-model_args = {
+sine_model_args = {
+    'obs_dim': 1,
+    'rec_latent_dim': 8,
+    'node_latent_dim': 4,
+
+    'rec_gru_unit': 100,
+    'rec_node_hidden': 100,
+    'rec_node_layer': 2,
+    'rec_node_act': 'Tanh',
+
+    'latent_node_hidden': 100,
+    'latent_node_layer': 2,
+    'latent_node_act': 'Tanh',
+
+    'dec_type': 'NN',
+    'dec_hidden': 100,
+    'dec_layer': 1,
+    'dec_act': 'ReLU',
+}
+
+aussign_model_args = {
     'obs_dim': 22,
     'rec_latent_dim': 50,
     'node_latent_dim': 25,
@@ -54,15 +79,20 @@ model_args = {
     'dec_act': 'ReLU',
 }
 
-base_model = LatentNeuralODEBuilder(**model_args)
+model_args = {
+    "sine": sine_model_args,
+    "aussign": aussign_model_args,
+}
+
+base_model = LatentNeuralODEBuilder(**model_args[args.data])
 model = base_model.build_latent_node(args.model).to(device)
 
 lr = 1e-3
 decay = 0.995
 
 train_args = {
-    'max_epoch': 400,
-    'l_std': 0.01,
+    'max_epoch': 300,
+    'l_std': 1,
     'clip_norm': 5,
     'model_atol': 1e-4,
     'model_rtol': 1e-3,
@@ -81,7 +111,7 @@ if args.beta:
 if args.ckpt_int:
     train_args['ckpt_int'] = args.ckpt_int
 
-if args.model == 'piwae':
+if args.model == 'piw':
     main = PIWTrainingLoop(model, train_loader, val_loader)
 
     inf_params = (model.enc.parameters())

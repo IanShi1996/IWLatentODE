@@ -2,7 +2,7 @@
 
 #SBATCH -N 1
 #SBATCH --gres=gpu:1
-#SBATCH -p t4v2,p100
+#SBATCH -p t4v2
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4GB
 #SBATCH --job-name=iwlatode
