@@ -34,7 +34,7 @@ args = parser.parse_args()
 print_exp = "Experiment: {} {} {} ".format(args.model, args.M, args.K)
 if args.beta:
     print_exp += str(args.beta)
-print(print_exp)
+print(print_exp, flush=True)
 
 batch_size = 256
 train_loader, val_loader = get_dataloaders(args.data, batch_size)
